@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MemeLab - 表情包生成器</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+    header { background: #6366f1; color: white; padding: 1.5rem; text-align: center; }
+    header h1 { font-size: 1.5rem; font-weight: 700; }
+    header p { font-size: 0.9rem; opacity: 0.85; margin-top: 0.25rem; }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 1rem; }
+
+    /* Template grid */
+    .template-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+    .template-card { background: white; border-radius: 8px; padding: 0.5rem; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; border: 2px solid transparent; }
+    .template-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .template-card.selected { border-color: #6366f1; }
+    .template-card img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; background: #eee; }
+    .template-card .name { font-size: 0.75rem; text-align: center; margin-top: 0.35rem; color: #555; }
+
+    /* Editor panel */
+    .editor { background: white; border-radius: 12px; padding: 1.25rem; display: none; }
+    .editor.active { display: block; }
+    .editor h2 { font-size: 1.1rem; margin-bottom: 1rem; }
+    .preview { text-align: center; margin-bottom: 1rem; }
+    .preview img { max-width: 100%; max-height: 350px; border-radius: 8px; background: #eee; }
+    .preview-placeholder { background: #eee; width: 100%; height: 200px; display: flex; align-items: center; justify-content: center; border-radius: 8px; color: #999; }
+    .fields { display: flex; flex-direction: column; gap: 0.75rem; }
+    .field-group { display: flex; flex-direction: column; gap: 0.25rem; }
+    .field-group label { font-size: 0.8rem; color: #666; font-weight: 500; }
+    .field-group input { padding: 0.6rem 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; outline: none; }
+    .field-group input:focus { border-color: #6366f1; }
+    .btn-row { display: flex; gap: 0.5rem; margin-top: 1rem; }
+    button { padding: 0.7rem 1.25rem; border: none; border-radius: 6px; font-size: 0.95rem; cursor: pointer; font-weight: 500; }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-secondary { background: #e5e7eb; color: #333; }
+    .btn-secondary:hover { background: #d1d5db; }
+    .btn-primary:disabled { background: #a5a5a5; cursor: not-allowed; }
+
+    /* Ad placeholder */
+    .ad-placeholder { background: #ddd; color: #999; text-align: center; padding: 0.75rem; font-size: 0.8rem; border-radius: 6px; margin-top: 1.5rem; }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem 1rem; font-size: 0.8rem; color: #999; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎨 MemeLab</h1>
+    <p>选择模板 → 输入文字 → 生成表情包</p>
+  </header>
+
+  <div class="container">
+    <div class="template-grid" id="templateGrid">
+      <div style="grid-column: 1/-1;text-align:center;padding:2rem;color:#999;">加载中...</div>
+    </div>
+
+    <div class="editor" id="editor">
+      <h2 id="editorTitle">模板名称</h2>
+      <div class="preview" id="preview">
+        <div class="preview-placeholder">预览区</div>
+      </div>
+      <div class="fields" id="fields"></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="generateBtn">生成</button>
+        <button class="btn-secondary" id="backBtn">返回</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="ad-placeholder">📺 广告位（AdSense）</div>
+  </div>
+
+  <footer>
+    © MemeLab · 免费表情包生成器
+  </footer>
+
+  <script>
+    const API = 'https://api.imgflip.com/get_memes';
+    let memes = [];
+    let selectedMeme = null;
+    let generatedUrl = null;
+
+    // Load templates
+    async function loadMemes() {
+      try {
+        const res = await fetch(API);
+        const data = await res.json();
+        memes = data.data.memes.slice(0, 50);
+        renderGrid(memes);
+      } catch {
+        document.getElementById('templateGrid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:2rem;color:#e55;">加载失败，请刷新重试</div>';
+      }
+    }
+
+    function renderGrid(list) {
+      const grid = document.getElementById('templateGrid');
+      grid.innerHTML = list.map(m => `
+        <div class="template-card" onclick="selectMeme(${m.id})">
+          <img src="${m.url}" alt="${m.name}" loading="lazy">
+          <div class="name">${m.name.substring(0, 20)}</div>
+        </div>
+      `).join('');
+    }
+
+    function selectMeme(id) {
+      selectedMeme = memes.find(m => m.id === id);
+      if (!selectedMeme) return;
+      document.getElementById('editorTitle').textContent = selectedMeme.name;
+      const boxCount = selectedMeme.box_count;
+      const fields = document.getElementById('fields');
+      fields.innerHTML = '';
+      for (let i = 0; i < boxCount; i++) {
+        fields.innerHTML += `
+          <div class="field-group">
+            <label>文字 ${i + 1}</label>
+            <input type="text" id="text${i}" placeholder="输入文字..." maxlength="100">
+          </div>
+        `;
+      }
+      document.getElementById('preview').innerHTML = `<img src="${selectedMeme.url}" alt="preview">`;
+      document.getElementById('templateGrid').parentElement.style.display = 'none';
+      document.getElementById('editor').classList.add('active');
+      generatedUrl = null;
+    }
+
+    async function generate() {
+      const btn = document.getElementById('generateBtn');
+      btn.disabled = true;
+      btn.textContent = '生成中...';
+
+      const texts = [];
+      for (let i = 0; i < selectedMeme.box_count; i++) {
+        const v = document.getElementById('text' + i).value;
+        texts.push(v);
+      }
+
+      try {
+        const res = await fetch('https://api.imgflip.com/caption_image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            template_id: selectedMeme.id,
+            username: 'MEMELAB_USER',   // replace with real credentials
+            password: 'MEMELAB_PASS',
+            text0: texts[0] || '',
+            text1: texts[1] || '',
+            text2: texts[2] || '',
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          generatedUrl = data.data.url;
+          document.getElementById('preview').innerHTML = `<img src="${generatedUrl}" alt="generated">`;
+          btn.textContent = '下载图片';
+          btn.onclick = downloadImage;
+        } else {
+          alert('生成失败：' + data.error_message);
+        }
+      } catch (e) {
+        alert('生成失败，请重试');
+      }
+      btn.disabled = false;
+      if (btn.onclick !== downloadImage) btn.textContent = '生成';
+    }
+
+    function downloadImage() {
+      if (!generatedUrl) return;
+      const a = document.createElement('a');
+      a.href = generatedUrl;
+      a.download = 'meme.jpg';
+      a.target = '_blank';
+      a.click();
+    }
+
+    function goBack() {
+      document.getElementById('editor').classList.remove('active');
+      document.getElementById('templateGrid').parentElement.style.display = '';
+      const btn = document.getElementById('generateBtn');
+      btn.textContent = '生成';
+      btn.onclick = generate;
+      selectedMeme = null;
+    }
+
+    document.getElementById('generateBtn').onclick = generate;
+    document.getElementById('backBtn').onclick = goBack;
+
+    loadMemes();
+  </script>
+</body>
+</html>
